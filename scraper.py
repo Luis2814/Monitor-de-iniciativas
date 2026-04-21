@@ -331,6 +331,62 @@ class ScraperBajaCaliforniaSur(DiarioOficialScraper):
             
         return resultados
 
+class ScraperFederacion(DiarioOficialScraper):
+    """Implementación para el Congreso de la Unión (Federación) usando el SIL."""
+    def __init__(self):
+        super().__init__("Federación")
+        # Nota: El SIL usa sesiones (SID) que caducan. Usaremos la URL de tu búsqueda.
+        self.url = "https://sil.gobernacion.gob.mx/Busquedas/Avanzada/ResultadosBusquedaAvanzada.php?SID=430edc92663c4962f471df7728ca07b7&Serial=9b27ab1eb3c2178c441d4cd968e13267&Reg=7704&Origen=BA&Paginas=15"
+        self.base_url = "https://sil.gobernacion.gob.mx"
+        
+    def scrape(self):
+        resultados = []
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
+            response = requests.get(self.url, headers=headers, timeout=15, verify=False)
+            response.encoding = 'utf-8'
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            filas = soup.find_all('tr')
+            for fila in filas:
+                celdas = fila.find_all('td')
+                # La tabla de resultados del SIL tiene al menos 10 columnas
+                if len(celdas) >= 10:
+                    tipo = celdas[1].get_text(strip=True)
+                    # Filtramos para asegurarnos de que sea una Iniciativa o Minuta
+                    if "Iniciativa" in tipo or "Minuta" in tipo:
+                        texto_limpio = celdas[2].get_text(separator=" ", strip=True)
+                        fecha_texto = celdas[5].get_text(strip=True)
+                        
+                        # Parsear la fecha que viene en formato DD/MM/YYYY
+                        try:
+                            fecha_obj = datetime.strptime(fecha_texto, "%d/%m/%Y")
+                            fecha_formateada = fecha_obj.strftime("%Y-%m-%d")
+                        except ValueError:
+                            fecha_formateada = datetime.now().strftime("%Y-%m-%d")
+                            
+                        # Extraer el enlace oculto en el atributo 'onclick'
+                        enlace_tag = celdas[2].find('a')
+                        enlace = self.url
+                        if enlace_tag and enlace_tag.has_attr('onclick'):
+                            onclick_text = enlace_tag['onclick']
+                            # Regex para extraer el texto dentro de window.open('AQUI')
+                            match = re.search(r'window\.open\([\'"]([^\'"]+)[\'"]', onclick_text)
+                            if match:
+                                enlace = self.base_url + match.group(1)
+                                
+                        if len(texto_limpio) > 20:
+                            resultados.append({
+                                "Estado": self.estado,
+                                "Fecha": fecha_formateada,
+                                "Texto Extraído": texto_limpio,
+                                "Enlace": enlace
+                            })
+        except Exception as e:
+            print(f"Error en Federación: {e}")
+            
+        return resultados
+
 def get_all_scraped_data() -> pd.DataFrame:
     """Ejecuta todos los scrapers reales."""
     data = []
@@ -340,16 +396,18 @@ def get_all_scraped_data() -> pd.DataFrame:
     scraper_ags = ScraperAguascalientes() 
     scraper_tab = ScraperTabasco() 
     scraper_bc = ScraperBajaCalifornia() 
-    scraper_bcs = ScraperBajaCaliforniaSur() # Añadimos a Baja California Sur
+    scraper_bcs = ScraperBajaCaliforniaSur()
+    scraper_fed = ScraperFederacion() # Instanciamos la Federación
     
     data.extend(scraper_gto.scrape())
     data.extend(scraper_nl.scrape())
     data.extend(scraper_ags.scrape()) 
     data.extend(scraper_tab.scrape()) 
     data.extend(scraper_bc.scrape()) 
-    data.extend(scraper_bcs.scrape()) # Ejecutamos a Baja California Sur
+    data.extend(scraper_bcs.scrape()) 
+    data.extend(scraper_fed.scrape()) # Ejecutamos a la Federación
     
-    # Prevenir KeyError: Si la lista de datos está vacía, creamos una estructura vacía segura.
+    # Prevenir KeyError si no se encuentran datos
     if len(data) == 0:
         return pd.DataFrame(columns=["Estado", "Fecha", "Texto Extraído", "Enlace"])
         
