@@ -10,6 +10,7 @@ COORDENADAS_ESTADOS = {
     "Aguascalientes": {"lat": 21.8853, "lon": -102.2916},
     "Baja California": {"lat": 30.8406, "lon": -115.2838},
     "Baja California Sur": {"lat": 26.0444, "lon": -111.1666},
+    "Federación": {"lat": 19.4326, "lon": -99.1332},
     "Guanajuato": {"lat": 21.0190, "lon": -101.2574},
     "Nuevo León": {"lat": 25.5922, "lon": -99.9962},
     "Tabasco": {"lat": 17.8409, "lon": -92.6180}
@@ -28,7 +29,7 @@ st.sidebar.header("⚙️ Panel de Control")
 
 with st.sidebar.form(key='search_form'):
     # Filtro de Estados
-    estados_lista = ["Aguascalientes", "Baja California", "Baja California Sur", "Guanajuato", "Nuevo León", "Tabasco"]
+    estados_lista = ["Aguascalientes", "Baja California", "Baja California Sur", "Federación", "Guanajuato", "Nuevo León", "Tabasco"]
     estado_filtro = st.multiselect("1. Selecciona Estados:", options=estados_lista, default=estados_lista)
     
     # Filtro de Palabras Clave (Predefinidas)
