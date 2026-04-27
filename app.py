@@ -39,7 +39,7 @@ with st.sidebar.form(key='search_form'):
     ]
     estado_filtro = st.multiselect("1. Selecciona Estados:", options=estados_lista, default=estados_lista)
     
-    # Filtro de Palabras Clave (Predefinidas actualizadas)
+    # Filtro de Palabras Clave (Predefinidas sin aborto/interrupción)
     opciones_palabras = [
         "Penal", "NNA", "Niña", "Niño", "Adolescente", 
         "Adopción", "Salud", 
@@ -89,7 +89,7 @@ if st.session_state.busqueda_iniciada:
         df_main = load_and_process_data()
         
     if df_main.empty or len(df_main) == 0:
-        st.warning("No se encontraron iniciativas en los últimos 5 días hábiles o hubo un bloqueo de red.")
+        st.warning("No se encontraron iniciativas o hubo un bloqueo temporal de red. Intenta de nuevo más tarde.")
     else:
         # A) Filtramos por los estados que eligió el usuario
         df_filtrado = df_main[df_main['Estado'].isin(estado_filtro)].copy()
@@ -110,7 +110,7 @@ if st.session_state.busqueda_iniciada:
             palabras_extra_limpias = [p.strip() for p in palabras_extra.split(",") if p.strip()]
             lista_completa_palabras.extend(palabras_extra_limpias)
         
-        # C) Aplicamos el filtro de palabras clave en el texto extraído
+        # D) Aplicamos el filtro de palabras clave en el texto extraído
         if lista_completa_palabras:
             patron_regex = '|'.join([re.escape(p) for p in lista_completa_palabras])
             df_relevante = df_filtrado[df_filtrado['Texto Extraído'].str.contains(patron_regex, case=False, na=False)].copy()
