@@ -4,4 +4,3 @@ requests
 beautifulsoup4
 plotly
 PyPDF2
-```
