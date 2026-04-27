@@ -7,6 +7,8 @@ from datetime import datetime
 import urllib3
 import ssl
 import re
+import io
+import PyPDF2
 
 # 1. Desactivar advertencias de seguridad SSL en la consola
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -367,7 +369,6 @@ class ScraperFederacion(DiarioOficialScraper):
         return resultados
 
 class ScraperCDMX(DiarioOficialScraper):
-    """Implementación REAL para la Ciudad de México (Afinada con Código Fuente)."""
     def __init__(self):
         super().__init__("Ciudad de México")
         self.url = "https://ciudadana.congresocdmx.gob.mx/Iniciativa/iniciativas"
@@ -381,7 +382,6 @@ class ScraperCDMX(DiarioOficialScraper):
             response.encoding = 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Buscar todas las tarjetas de iniciativas (articles con clase postcard)
             articulos = soup.find_all('article', class_='postcard')
             
             meses = {
@@ -390,13 +390,11 @@ class ScraperCDMX(DiarioOficialScraper):
             }
             
             for articulo in articulos:
-                # 1. Extraer el texto de la iniciativa
                 texto_div = articulo.find('div', class_='postcard__preview-txt')
                 if not texto_div:
                     continue
                 texto_limpio = texto_div.get_text(separator=" ", strip=True)
                 
-                # 2. Extraer el enlace
                 enlace_tag = articulo.find('a', href=True)
                 if enlace_tag:
                     href = enlace_tag['href']
@@ -404,17 +402,14 @@ class ScraperCDMX(DiarioOficialScraper):
                 else:
                     enlace = self.url
                     
-                # 3. Extraer la fecha y darle formato correcto (YYYY-MM-DD)
                 fecha_formateada = datetime.now().strftime("%Y-%m-%d")
                 time_tag = articulo.find('time')
                 
                 if time_tag:
                     fecha_texto = time_tag.get_text(strip=True).lower()
-                    # Busca el formato: 23 abr 2026
                     match = re.search(r'(\d{1,2})\s+([a-z]+)\s+(\d{4})', fecha_texto)
                     if match:
                         dia, mes_texto, anio = match.groups()
-                        # Toma las primeras 3 letras del mes y lo busca en el diccionario
                         mes_num = meses.get(mes_texto[:3], '01') 
                         fecha_formateada = f"{anio}-{mes_num}-{dia.zfill(2)}"
                         
@@ -430,6 +425,89 @@ class ScraperCDMX(DiarioOficialScraper):
             
         return resultados
 
+class ScraperEdomex(DiarioOficialScraper):
+    """Implementación Lector de PDFs para el Estado de México."""
+    def __init__(self):
+        super().__init__("Estado de México")
+        self.url = "https://www.congresoedomex.gob.mx/trabajo-legislativo"
+
+    def scrape(self):
+        resultados = []
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'}
+            response = requests.get(self.url, headers=headers, timeout=15, verify=False)
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # 1. Buscamos la última gaceta disponible (la primera tarjeta)
+            gaceta_card = soup.find('a', class_='gaceta-card-link')
+            if not gaceta_card:
+                return resultados
+
+            enlace_pdf = gaceta_card['href']
+
+            # 2. Extraer la fecha de la tarjeta
+            fecha_formateada = datetime.now().strftime("%Y-%m-%d")
+            fecha_tag = gaceta_card.find('div', class_='gaceta-fecha')
+            
+            if fecha_tag:
+                texto_fecha = fecha_tag.get_text(strip=True).lower()
+                meses = {
+                    'enero':'01', 'febrero':'02', 'marzo':'03', 'abril':'04', 'mayo':'05', 'junio':'06',
+                    'julio':'07', 'agosto':'08', 'septiembre':'09', 'octubre':'10', 'noviembre':'11', 'diciembre':'12'
+                }
+                match = re.search(r'(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})', texto_fecha)
+                if match:
+                    dia, mes_texto, anio = match.groups()
+                    mes_num = meses.get(mes_texto, '01')
+                    fecha_formateada = f"{anio}-{mes_num}-{dia.zfill(2)}"
+
+            # 3. Magia: Descargar y leer el PDF en memoria invisible
+            res_pdf = requests.get(enlace_pdf, headers=headers, timeout=25, verify=False)
+            lector = PyPDF2.PdfReader(io.BytesIO(res_pdf.content))
+
+            # Leer SOLO las primeras 10 páginas (para no saturar la memoria, aquí suele estar el índice)
+            texto_completo = ""
+            limite_paginas = min(10, len(lector.pages))
+            for i in range(limite_paginas):
+                pag = lector.pages[i].extract_text()
+                if pag:
+                    texto_completo += pag + " "
+
+            # 4. Dividir el documento cada vez que mencione la palabra "Iniciativa"
+            # Captura patrones como: "Iniciativa con proyecto de...", "Iniciativa de ley..."
+            fragmentos = re.split(r'(?i)(Iniciativa\s+con\s+proyecto|Iniciativa\s+de\s+ley|Iniciativa\s+de\s+decreto|Iniciativa\s+formulada)', texto_completo)
+
+            if len(fragmentos) > 1:
+                # Extraemos el título capturado y un fragmento de texto siguiente
+                for i in range(1, len(fragmentos), 2):
+                    titulo_encontrado = fragmentos[i]
+                    contenido_asociado = fragmentos[i+1][:400] # Tomamos los siguientes 400 caracteres como contexto
+                    texto_iniciativa = f"{titulo_encontrado} {contenido_asociado}".strip()
+                    
+                    # Limpiamos los saltos de línea raros del PDF
+                    texto_iniciativa = re.sub(r'\s+', ' ', texto_iniciativa) 
+
+                    if len(texto_iniciativa) > 40:
+                        resultados.append({
+                            "Estado": self.estado,
+                            "Fecha": fecha_formateada,
+                            "Texto Extraído": texto_iniciativa,
+                            "Enlace": enlace_pdf
+                        })
+            else:
+                # Si por alguna razón el índice no dice "Iniciativa", mandamos un resumen general de la gaceta
+                resultados.append({
+                    "Estado": self.estado,
+                    "Fecha": fecha_formateada,
+                    "Texto Extraído": f"Gaceta Parlamentaria (Resumen General): {texto_completo[:600]}...",
+                    "Enlace": enlace_pdf
+                })
+
+        except Exception as e:
+            print(f"Error en Estado de México: {e}")
+
+        return resultados
+
 def get_all_scraped_data() -> pd.DataFrame:
     """Ejecuta todos los scrapers reales."""
     data = []
@@ -441,7 +519,8 @@ def get_all_scraped_data() -> pd.DataFrame:
     scraper_bc = ScraperBajaCalifornia() 
     scraper_bcs = ScraperBajaCaliforniaSur()
     scraper_fed = ScraperFederacion() 
-    scraper_cdmx = ScraperCDMX() # Instanciamos la CDMX
+    scraper_cdmx = ScraperCDMX() 
+    scraper_edomex = ScraperEdomex() # Instanciamos Edomex
     
     data.extend(scraper_gto.scrape())
     data.extend(scraper_nl.scrape())
@@ -450,22 +529,10 @@ def get_all_scraped_data() -> pd.DataFrame:
     data.extend(scraper_bc.scrape()) 
     data.extend(scraper_bcs.scrape()) 
     data.extend(scraper_fed.scrape()) 
-    data.extend(scraper_cdmx.scrape()) # Ejecutamos a la CDMX
+    data.extend(scraper_cdmx.scrape()) 
+    data.extend(scraper_edomex.scrape()) # Ejecutamos Edomex
     
     if len(data) == 0:
         return pd.DataFrame(columns=["Estado", "Fecha", "Texto Extraído", "Enlace"])
         
-    df = pd.DataFrame(data)
-    
-    # --- FILTRO DE LOS ÚLTIMOS 5 DÍAS HÁBILES ---
-    df['Fecha_Parseada'] = pd.to_datetime(df['Fecha'], dayfirst=True, errors='coerce')
-    hoy = pd.Timestamp.today().normalize()
-    fecha_corte = hoy - BDay(5)
-    
-    df_filtrado = df[(df['Fecha_Parseada'] >= fecha_corte) | (df['Fecha_Parseada'].isna())].copy()
-    df_filtrado.drop(columns=['Fecha_Parseada'], inplace=True)
-    
-    if df_filtrado.empty:
-        return pd.DataFrame(columns=["Estado", "Fecha", "Texto Extraído", "Enlace"])
-        
-    return df_filtrado
+    return pd.DataFrame(data)
