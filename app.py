@@ -10,6 +10,7 @@ COORDENADAS_ESTADOS = {
     "Aguascalientes": {"lat": 21.8853, "lon": -102.2916},
     "Baja California": {"lat": 30.8406, "lon": -115.2838},
     "Baja California Sur": {"lat": 26.0444, "lon": -111.1666},
+    "Ciudad de México": {"lat": 19.3500, "lon": -99.1500}, # Ligeramente movido para no chocar con Federación
     "Federación": {"lat": 19.4326, "lon": -99.1332},
     "Guanajuato": {"lat": 21.0190, "lon": -101.2574},
     "Nuevo León": {"lat": 25.5922, "lon": -99.9962},
@@ -29,7 +30,10 @@ st.sidebar.header("⚙️ Panel de Control")
 
 with st.sidebar.form(key='search_form'):
     # Filtro de Estados
-    estados_lista = ["Aguascalientes", "Baja California", "Baja California Sur", "Federación", "Guanajuato", "Nuevo León", "Tabasco"]
+    estados_lista = [
+        "Aguascalientes", "Baja California", "Baja California Sur", 
+        "Ciudad de México", "Federación", "Guanajuato", "Nuevo León", "Tabasco"
+    ]
     estado_filtro = st.multiselect("1. Selecciona Estados:", options=estados_lista, default=estados_lista)
     
     # Filtro de Palabras Clave (Predefinidas)
@@ -48,7 +52,7 @@ with st.sidebar.form(key='search_form'):
     palabras_extra = st.text_input("3. O ingresa nuevas (separadas por coma):", placeholder="Ej. civil, violencia, fraude...")
     
     # Botón maestro para arrancar
-    st.write("") # Espacio en blanco
+    st.write("") 
     submit_button = st.form_submit_button(label="Empezar Búsqueda 🚀")
 
 # Si el usuario presiona el botón, cambiamos el estado a True
@@ -63,7 +67,7 @@ def load_and_process_data():
         return pd.DataFrame(columns=["Estado", "Fecha", "Texto Extraído", "Enlace", "Clasificación", "Severidad"])
     
     df['Fecha'] = pd.to_datetime(df['Fecha'])
-    df = nlp.process_dataframe_nlp(df) # Mantenemos el NLP para medir severidad
+    df = nlp.process_dataframe_nlp(df) 
     return df
 
 # 5. --- LÓGICA PRINCIPAL AL INICIAR BÚSQUEDA ---
@@ -77,18 +81,15 @@ if st.session_state.busqueda_iniciada:
         # A) Filtramos por los estados que eligió el usuario
         df_filtrado = df_main[df_main['Estado'].isin(estado_filtro)]
         
-        # B) Consolidamos todas las palabras clave (las del menú + las escritas a mano)
+        # B) Consolidamos todas las palabras clave
         lista_completa_palabras = palabras_seleccionadas.copy()
         if palabras_extra:
-            # Limpiamos los espacios extras de las palabras escritas a mano
             palabras_extra_limpias = [p.strip() for p in palabras_extra.split(",") if p.strip()]
             lista_completa_palabras.extend(palabras_extra_limpias)
         
         # C) Aplicamos el filtro de palabras clave en el texto extraído
         if lista_completa_palabras:
-            # Creamos un patrón matemático (Regex) que busque cualquier palabra de la lista
             patron_regex = '|'.join([re.escape(p) for p in lista_completa_palabras])
-            # case=False hace que no importe si está en mayúsculas o minúsculas
             df_relevante = df_filtrado[df_filtrado['Texto Extraído'].str.contains(patron_regex, case=False, na=False)].copy()
         else:
             df_relevante = df_filtrado.copy()
@@ -103,19 +104,15 @@ if st.session_state.busqueda_iniciada:
         st.subheader("🗺️ Mapa de Impacto Territorial")
         
         if not df_relevante.empty:
-            # Aseguramos que exista la columna Severidad para que el mapa no falle
             if 'Severidad' not in df_relevante.columns:
                 df_relevante['Severidad'] = 0
                 
-            # Agrupamos los datos para el mapa
             df_mapa = df_relevante.groupby('Estado').agg({'Severidad': 'sum', 'Texto Extraído': 'count'}).reset_index()
             df_mapa.rename(columns={'Texto Extraído': 'Total Iniciativas'}, inplace=True)
             
-            # Asignamos coordenadas
             df_mapa['lat'] = df_mapa['Estado'].map(lambda x: COORDENADAS_ESTADOS.get(x, {}).get('lat', 23.6345))
             df_mapa['lon'] = df_mapa['Estado'].map(lambda x: COORDENADAS_ESTADOS.get(x, {}).get('lon', -102.5528))
 
-            # Dibujamos el mapa
             fig = px.scatter_geo(
                 df_mapa,
                 lat='lat',
@@ -132,7 +129,7 @@ if st.session_state.busqueda_iniciada:
             fig.update_geos(fitbounds="locations", visible=False, showcountries=True, countrycolor="Black", showsubunits=True, subunitcolor="Gray")
             st.plotly_chart(fig)
         else:
-            st.info("No hay iniciativas que coincidan con las palabras clave ingresadas.")
+            st.info("No hay iniciativas que coincidan con las palabras clave ingresadas en los últimos 5 días hábiles.")
 
         # --- TABLA DE DATOS DETALLADOS ---
         st.divider()
@@ -151,5 +148,4 @@ if st.session_state.busqueda_iniciada:
                 hide_index=True
             )
 else:
-    # Pantalla de bienvenida antes de apretar el botón
     st.info("👈 **Configura tus filtros en el menú lateral** y haz clic en **'Empezar Búsqueda 🚀'** para comenzar a analizar los Diarios Oficiales.")
