@@ -4,13 +4,16 @@ import plotly.express as px
 import re
 import scraper
 import nlp
+import datetime
+from pandas.tseries.offsets import BDay
 
 # Coordenadas exactas de los estados para ubicarlos en el mapa
 COORDENADAS_ESTADOS = {
     "Aguascalientes": {"lat": 21.8853, "lon": -102.2916},
     "Baja California": {"lat": 30.8406, "lon": -115.2838},
     "Baja California Sur": {"lat": 26.0444, "lon": -111.1666},
-    "Ciudad de México": {"lat": 19.3500, "lon": -99.1500}, # Ligeramente movido para no chocar con Federación
+    "Ciudad de México": {"lat": 19.3500, "lon": -99.1500}, 
+    "Estado de México": {"lat": 19.2891, "lon": -99.6556}, # Agregado Edomex
     "Federación": {"lat": 19.4326, "lon": -99.1332},
     "Guanajuato": {"lat": 21.0190, "lon": -101.2574},
     "Nuevo León": {"lat": 25.5922, "lon": -99.9962},
@@ -32,11 +35,11 @@ with st.sidebar.form(key='search_form'):
     # Filtro de Estados
     estados_lista = [
         "Aguascalientes", "Baja California", "Baja California Sur", 
-        "Ciudad de México", "Federación", "Guanajuato", "Nuevo León", "Tabasco"
+        "Ciudad de México", "Estado de México", "Federación", "Guanajuato", "Nuevo León", "Tabasco"
     ]
     estado_filtro = st.multiselect("1. Selecciona Estados:", options=estados_lista, default=estados_lista)
     
-    # Filtro de Palabras Clave (Predefinidas)
+    # Filtro de Palabras Clave (Predefinidas actualizadas)
     opciones_palabras = [
         "Penal", "NNA", "Niña", "Niño", "Adolescente", 
         "Adopción", "Salud", 
@@ -50,6 +53,16 @@ with st.sidebar.form(key='search_form'):
     
     # Filtro de Palabras Clave (Manuales)
     palabras_extra = st.text_input("3. O ingresa nuevas (separadas por coma):", placeholder="Ej. civil, violencia, fraude...")
+    
+    # Filtro de Rango de Fechas
+    hoy = datetime.date.today()
+    hace_5_dias = (pd.Timestamp.today() - BDay(5)).date()
+    
+    rango_fechas = st.date_input(
+        "4. Rango de fechas:",
+        value=(hace_5_dias, hoy),
+        max_value=hoy
+    )
     
     # Botón maestro para arrancar
     st.write("") 
@@ -76,12 +89,22 @@ if st.session_state.busqueda_iniciada:
         df_main = load_and_process_data()
         
     if df_main.empty or len(df_main) == 0:
-        st.warning("No se encontraron iniciativas en este momento o hubo un bloqueo temporal de red. Intenta de nuevo más tarde.")
+        st.warning("No se encontraron iniciativas en los últimos 5 días hábiles o hubo un bloqueo de red.")
     else:
         # A) Filtramos por los estados que eligió el usuario
-        df_filtrado = df_main[df_main['Estado'].isin(estado_filtro)]
+        df_filtrado = df_main[df_main['Estado'].isin(estado_filtro)].copy()
         
-        # B) Consolidamos todas las palabras clave
+        # B) Aplicamos el Filtro de Fechas
+        if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
+            fecha_inicio, fecha_fin = rango_fechas
+        else:
+            fecha_inicio, fecha_fin = rango_fechas[0], rango_fechas[0]
+            
+        df_filtrado['Fecha_dt'] = pd.to_datetime(df_filtrado['Fecha']).dt.date
+        df_filtrado = df_filtrado[(df_filtrado['Fecha_dt'] >= fecha_inicio) & (df_filtrado['Fecha_dt'] <= fecha_fin)]
+        df_filtrado.drop(columns=['Fecha_dt'], inplace=True)
+        
+        # C) Consolidamos todas las palabras clave
         lista_completa_palabras = palabras_seleccionadas.copy()
         if palabras_extra:
             palabras_extra_limpias = [p.strip() for p in palabras_extra.split(",") if p.strip()]
@@ -96,7 +119,7 @@ if st.session_state.busqueda_iniciada:
 
         # --- SECCIÓN DE RESULTADOS VISUALES ---
         col1, col2 = st.columns(2)
-        col1.metric("Publicaciones Totales Extraídas", len(df_filtrado))
+        col1.metric("Publicaciones en el Rango de Fechas", len(df_filtrado))
         col2.metric("Iniciativas que coinciden con tus palabras", len(df_relevante))
 
         # --- MAPA DE CALOR ---
@@ -129,7 +152,7 @@ if st.session_state.busqueda_iniciada:
             fig.update_geos(fitbounds="locations", visible=False, showcountries=True, countrycolor="Black", showsubunits=True, subunitcolor="Gray")
             st.plotly_chart(fig)
         else:
-            st.info("No hay iniciativas que coincidan con las palabras clave ingresadas en los últimos 5 días hábiles.")
+            st.info("No hay iniciativas que coincidan con las palabras clave en el rango de fechas seleccionado.")
 
         # --- TABLA DE DATOS DETALLADOS ---
         st.divider()
