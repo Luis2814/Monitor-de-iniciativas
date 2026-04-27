@@ -6,8 +6,6 @@ from datetime import datetime
 import urllib3
 import ssl
 import re
-import io
-import PyPDF2
 
 # 1. Desactivar advertencias de seguridad SSL en la consola
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -372,7 +370,7 @@ class ScraperCDMX(DiarioOficialScraper):
         return resultados
 
 class ScraperEdomex(DiarioOficialScraper):
-    """Implementación para el Estado de México (PDFs Escaneados)."""
+    """Implementación para Estado de México (Degradación Elegante para PDFs escaneados)."""
     def __init__(self):
         super().__init__("Estado de México")
         self.url = "https://www.congresoedomex.gob.mx/trabajo-legislativo"
@@ -384,7 +382,7 @@ class ScraperEdomex(DiarioOficialScraper):
             response = requests.get(self.url, headers=headers, timeout=15, verify=False)
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Buscamos la última gaceta disponible
+            # Buscamos la última gaceta disponible en la cuadrícula
             gaceta_card = soup.find('a', class_='gaceta-card-link')
             if not gaceta_card:
                 return resultados
@@ -405,18 +403,18 @@ class ScraperEdomex(DiarioOficialScraper):
                     mes_num = meses.get(mes_texto, '01')
                     fecha_formateada = f"{anio}-{mes_num}-{dia.zfill(2)}"
 
-            # Texto comodín para engañar al filtro de palabras clave y forzar la revisión manual
-            texto_comodin = (
-                "⚠️ GACETA PARLAMENTARIA PUBLICADA (DOCUMENTO ESCANEADO). "
-                "Alerta de revisión manual requerida. "
-                "Palabras clave potenciales incluidas: Penal, NNA, Niña, Niño, Adolescente, "
-                "Adopción, Salud, Seguridad, Constitución, Educación, Presupuesto."
+            # --- TEXTO COMODÍN ---
+            # Inyectamos palabras clave genéricas para forzar que el filtro de la app te lo muestre
+            texto_alerta = (
+                "⚠️ NUEVA GACETA PARLAMENTARIA PUBLICADA (Documento Escaneado). "
+                "Haz clic en el enlace para revisar manualmente el PDF. "
+                "Palabras clave potenciales: Penal, NNA, Niña, Niño, Adolescente, Adopción, Salud, Seguridad, Constitución, Educación, Presupuesto."
             )
 
             resultados.append({
                 "Estado": self.estado,
                 "Fecha": fecha_formateada,
-                "Texto Extraído": texto_comodin,
+                "Texto Extraído": texto_alerta,
                 "Enlace": enlace_pdf
             })
 
