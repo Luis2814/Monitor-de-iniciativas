@@ -13,7 +13,7 @@ COORDENADAS_ESTADOS = {
     "Baja California": {"lat": 30.8406, "lon": -115.2838},
     "Baja California Sur": {"lat": 26.0444, "lon": -111.1666},
     "Ciudad de México": {"lat": 19.3500, "lon": -99.1500}, 
-    "Estado de México": {"lat": 19.2891, "lon": -99.6556}, # Agregado Edomex
+    "Estado de México": {"lat": 19.2891, "lon": -99.6556}, 
     "Federación": {"lat": 19.4326, "lon": -99.1332},
     "Guanajuato": {"lat": 21.0190, "lon": -101.2574},
     "Nuevo León": {"lat": 25.5922, "lon": -99.9962},
@@ -81,6 +81,14 @@ def load_and_process_data():
     
     df['Fecha'] = pd.to_datetime(df['Fecha'])
     df = nlp.process_dataframe_nlp(df) 
+    
+    # ---> PASE VIP PARA EL ESTADO DE MÉXICO <---
+    # Forzamos que nunca sea "Fuera de Enfoque" para que el NLP no lo borre
+    if 'Clasificación' in df.columns:
+        df.loc[df['Estado'] == 'Estado de México', 'Clasificación'] = 'Revisión Manual (Gaceta Escaneada)'
+    if 'Severidad' in df.columns:
+        df.loc[df['Estado'] == 'Estado de México', 'Severidad'] = 0
+        
     return df
 
 # 5. --- LÓGICA PRINCIPAL AL INICIAR BÚSQUEDA ---
@@ -104,6 +112,12 @@ if st.session_state.busqueda_iniciada:
         df_filtrado = df_filtrado[(df_filtrado['Fecha_dt'] >= fecha_inicio) & (df_filtrado['Fecha_dt'] <= fecha_fin)]
         df_filtrado.drop(columns=['Fecha_dt'], inplace=True)
         
+        # Eliminamos los que la Inteligencia Artificial clasificó como basura (excepto Edomex que tiene pase VIP)
+        if 'Clasificación' in df_filtrado.columns:
+            df_relevante = df_filtrado[df_filtrado['Clasificación'] != 'Fuera de Enfoque'].copy()
+        else:
+            df_relevante = df_filtrado.copy()
+            
         # C) Consolidamos todas las palabras clave
         lista_completa_palabras = palabras_seleccionadas.copy()
         if palabras_extra:
@@ -113,14 +127,18 @@ if st.session_state.busqueda_iniciada:
         # D) Aplicamos el filtro de palabras clave en el texto extraído
         if lista_completa_palabras:
             patron_regex = '|'.join([re.escape(p) for p in lista_completa_palabras])
-            df_relevante = df_filtrado[df_filtrado['Texto Extraído'].str.contains(patron_regex, case=False, na=False)].copy()
-        else:
-            df_relevante = df_filtrado.copy()
+            
+            # ---> PASE VIP ABSOLUTO <---
+            # Si el estado es Edomex, se salta el filtro de palabras clave y aparece siempre
+            cond_palabras = df_relevante['Texto Extraído'].str.contains(patron_regex, case=False, na=False)
+            cond_edomex = df_relevante['Estado'] == 'Estado de México'
+            
+            df_relevante = df_relevante[cond_palabras | cond_edomex].copy()
 
         # --- SECCIÓN DE RESULTADOS VISUALES ---
         col1, col2 = st.columns(2)
         col1.metric("Publicaciones en el Rango de Fechas", len(df_filtrado))
-        col2.metric("Iniciativas que coinciden con tus palabras", len(df_relevante))
+        col2.metric("Iniciativas que coinciden con tus filtros", len(df_relevante))
 
         # --- MAPA DE CALOR ---
         st.divider()
