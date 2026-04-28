@@ -44,7 +44,6 @@ class ScraperGuanajuato(DiarioOficialScraper):
                     enlace = "https://www.congresogto.gob.mx" + href if href.startswith('/') else href
                 else:
                     enlace = self.url
-                    
                 if len(texto) > 40:
                     resultados.append({
                         "Estado": self.estado,
@@ -370,7 +369,7 @@ class ScraperCDMX(DiarioOficialScraper):
         return resultados
 
 class ScraperEdomex(DiarioOficialScraper):
-    """Implementación para Estado de México (Degradación Elegante para PDFs escaneados)."""
+    """Implementación para Estado de México (Extrae la liga de la Gaceta para revisión manual)"""
     def __init__(self):
         super().__init__("Estado de México")
         self.url = "https://www.congresoedomex.gob.mx/trabajo-legislativo"
@@ -382,15 +381,18 @@ class ScraperEdomex(DiarioOficialScraper):
             response = requests.get(self.url, headers=headers, timeout=15, verify=False)
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Buscamos la última gaceta disponible en la cuadrícula
+            # Buscamos la última gaceta disponible
             gaceta_card = soup.find('a', class_='gaceta-card-link')
             if not gaceta_card:
                 return resultados
 
             enlace_pdf = gaceta_card['href']
+            if not enlace_pdf.startswith('http'):
+                enlace_pdf = "https://www.congresoedomex.gob.mx" + enlace_pdf
+
+            # Extraemos la fecha de la tarjeta
             fecha_formateada = datetime.now().strftime("%Y-%m-%d")
             fecha_tag = gaceta_card.find('div', class_='gaceta-fecha')
-            
             if fecha_tag:
                 texto_fecha = fecha_tag.get_text(strip=True).lower()
                 meses = {
@@ -403,13 +405,8 @@ class ScraperEdomex(DiarioOficialScraper):
                     mes_num = meses.get(mes_texto, '01')
                     fecha_formateada = f"{anio}-{mes_num}-{dia.zfill(2)}"
 
-            # --- TEXTO COMODÍN ---
-            # Inyectamos palabras clave genéricas para forzar que el filtro de la app te lo muestre
-            texto_alerta = (
-                "⚠️ NUEVA GACETA PARLAMENTARIA PUBLICADA (Documento Escaneado). "
-                "Haz clic en el enlace para revisar manualmente el PDF. "
-                "Palabras clave potenciales: Penal, NNA, Niña, Niño, Adolescente, Adopción, Salud, Seguridad, Constitución, Educación, Presupuesto."
-            )
+            # Texto de alerta (Forzamos a que pase los filtros de NLP)
+            texto_alerta = "🚨 NUEVA GACETA DEL ESTADO DE MÉXICO. El documento es un PDF escaneado (Imagen). Por favor, abre el enlace para revisar las iniciativas manualmente."
 
             resultados.append({
                 "Estado": self.estado,
@@ -425,6 +422,7 @@ class ScraperEdomex(DiarioOficialScraper):
 
 def get_all_scraped_data() -> pd.DataFrame:
     data = []
+    
     scraper_gto = ScraperGuanajuato()
     scraper_nl = ScraperNuevoLeon()
     scraper_ags = ScraperAguascalientes() 
@@ -433,7 +431,7 @@ def get_all_scraped_data() -> pd.DataFrame:
     scraper_bcs = ScraperBajaCaliforniaSur()
     scraper_fed = ScraperFederacion() 
     scraper_cdmx = ScraperCDMX() 
-    scraper_edomex = ScraperEdomex() # Instanciamos Edomex
+    scraper_edomex = ScraperEdomex() # Agregamos a Edomex
     
     data.extend(scraper_gto.scrape())
     data.extend(scraper_nl.scrape())
@@ -443,7 +441,7 @@ def get_all_scraped_data() -> pd.DataFrame:
     data.extend(scraper_bcs.scrape()) 
     data.extend(scraper_fed.scrape()) 
     data.extend(scraper_cdmx.scrape()) 
-    data.extend(scraper_edomex.scrape()) # Ejecutamos Edomex
+    data.extend(scraper_edomex.scrape()) 
     
     if len(data) == 0:
         return pd.DataFrame(columns=["Estado", "Fecha", "Texto Extraído", "Enlace"])
