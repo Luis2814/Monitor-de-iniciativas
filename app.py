@@ -39,7 +39,7 @@ with st.sidebar.form(key='search_form'):
     ]
     estado_filtro = st.multiselect("1. Selecciona Estados:", options=estados_lista, default=estados_lista)
     
-    # Filtro de Palabras Clave (Predefinidas sin aborto/interrupción)
+    # Filtro de Palabras Clave (Predefinidas)
     opciones_palabras = [
         "Penal", "NNA", "Niña", "Niño", "Adolescente", 
         "Adopción", "Salud", 
@@ -64,15 +64,13 @@ with st.sidebar.form(key='search_form'):
         max_value=hoy
     )
     
-    # Botón maestro para arrancar
     st.write("") 
     submit_button = st.form_submit_button(label="Empezar Búsqueda 🚀")
 
-# Si el usuario presiona el botón, cambiamos el estado a True
 if submit_button:
     st.session_state.busqueda_iniciada = True
 
-# 4. Función de Extracción 
+# 4. Función de Extracción
 @st.cache_data(ttl=3600) 
 def load_and_process_data():
     df = scraper.get_all_scraped_data()
@@ -83,7 +81,6 @@ def load_and_process_data():
     df = nlp.process_dataframe_nlp(df) 
     
     # ---> PASE VIP PARA EL ESTADO DE MÉXICO <---
-    # Forzamos que nunca sea "Fuera de Enfoque" para que el NLP no lo borre
     if 'Clasificación' in df.columns:
         df.loc[df['Estado'] == 'Estado de México', 'Clasificación'] = 'Revisión Manual (Gaceta Escaneada)'
     if 'Severidad' in df.columns:
@@ -99,10 +96,10 @@ if st.session_state.busqueda_iniciada:
     if df_main.empty or len(df_main) == 0:
         st.warning("No se encontraron iniciativas o hubo un bloqueo temporal de red. Intenta de nuevo más tarde.")
     else:
-        # A) Filtramos por los estados que eligió el usuario
+        # A) Filtro por estados
         df_filtrado = df_main[df_main['Estado'].isin(estado_filtro)].copy()
         
-        # B) Aplicamos el Filtro de Fechas
+        # B) Filtro por rango de fechas
         if isinstance(rango_fechas, tuple) and len(rango_fechas) == 2:
             fecha_inicio, fecha_fin = rango_fechas
         else:
@@ -111,34 +108,40 @@ if st.session_state.busqueda_iniciada:
         df_filtrado['Fecha_dt'] = pd.to_datetime(df_filtrado['Fecha']).dt.date
         df_filtrado = df_filtrado[(df_filtrado['Fecha_dt'] >= fecha_inicio) & (df_filtrado['Fecha_dt'] <= fecha_fin)]
         df_filtrado.drop(columns=['Fecha_dt'], inplace=True)
-        
-        # Eliminamos los que la Inteligencia Artificial clasificó como basura (excepto Edomex que tiene pase VIP)
-        if 'Clasificación' in df_filtrado.columns:
-            df_relevante = df_filtrado[df_filtrado['Clasificación'] != 'Fuera de Enfoque'].copy()
-        else:
-            df_relevante = df_filtrado.copy()
-            
-        # C) Consolidamos todas las palabras clave
+
+        # C) Consolidar palabras clave
         lista_completa_palabras = palabras_seleccionadas.copy()
         if palabras_extra:
             palabras_extra_limpias = [p.strip() for p in palabras_extra.split(",") if p.strip()]
             lista_completa_palabras.extend(palabras_extra_limpias)
-        
-        # D) Aplicamos el filtro de palabras clave en el texto extraído
+
+        # D) *** FIX PRINCIPAL ***
+        # Si el usuario NO tiene palabras clave activas → mostrar TODO el rango de fechas
+        # sin aplicar el filtro NLP ("Fuera de Enfoque").
+        # Si SÍ tiene palabras clave → aplicar NLP + filtro de palabras (comportamiento original).
         if lista_completa_palabras:
+            # Modo filtrado: eliminamos lo que el NLP descartó
+            if 'Clasificación' in df_filtrado.columns:
+                df_relevante = df_filtrado[df_filtrado['Clasificación'] != 'Fuera de Enfoque'].copy()
+            else:
+                df_relevante = df_filtrado.copy()
+
             patron_regex = '|'.join([re.escape(p) for p in lista_completa_palabras])
-            
-            # ---> PASE VIP ABSOLUTO <---
-            # Si el estado es Edomex, se salta el filtro de palabras clave y aparece siempre
             cond_palabras = df_relevante['Texto Extraído'].str.contains(patron_regex, case=False, na=False)
             cond_edomex = df_relevante['Estado'] == 'Estado de México'
-            
             df_relevante = df_relevante[cond_palabras | cond_edomex].copy()
+        else:
+            # Modo sin filtro: mostramos TODAS las iniciativas del rango sin importar NLP
+            df_relevante = df_filtrado.copy()
 
-        # --- SECCIÓN DE RESULTADOS VISUALES ---
+        # --- MÉTRICAS ---
         col1, col2 = st.columns(2)
         col1.metric("Publicaciones en el Rango de Fechas", len(df_filtrado))
         col2.metric("Iniciativas que coinciden con tus filtros", len(df_relevante))
+
+        # Etiqueta informativa según modo activo
+        if not lista_completa_palabras:
+            st.info("ℹ️ Sin palabras clave activas: mostrando **todas** las iniciativas del período seleccionado.")
 
         # --- MAPA DE CALOR ---
         st.divider()
